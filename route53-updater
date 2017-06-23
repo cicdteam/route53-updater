@@ -1,0 +1,40 @@
+#!/bin/sh
+
+if [ -z "$ROUTE53_ZONE_ID" ]; then
+    echo 'Please set ROUTE53_ZONE_ID environment variable. Exiting'
+    exit
+fi
+
+if [ -z "$ROUTE53_HOSTNAME" ]; then
+    echo 'Please set ROUTE53_HOSTNAME environment variable. Exiting'
+    exit
+fi
+
+publicIP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+if [ -z "$publicIP" ]; then
+    echo 'Public IP address not found in instance meta-data. Exiting'
+    exit
+fi
+
+r53_value=`aws route53 list-resource-record-sets --hosted-zone-id $ROUTE53_ZONE_ID | jq -r ".ResourceRecordSets[]|select(.Name == \"${ROUTE53_HOSTNAME}.\").ResourceRecords[].Value"`
+
+if [ "$publicIP" != "$r53_value" ]; then
+    echo "Updating A record for $ROUTE53_HOSTNAME to $publicIP"
+    aws route53 change-resource-record-sets \
+        --hosted-zone-id $ROUTE53_ZONE_ID \
+        --change-batch \
+        "
+          {\"Changes\": [{
+            \"Action\": \"UPSERT\",
+            \"ResourceRecordSet\": {
+                    \"Name\": \"$ROUTE53_HOSTNAME\",
+                    \"Type\": \"A\",
+                    \"TTL\": 60,
+                    \"ResourceRecords\": [{\"Value\": \"$publicIP\"}]
+                }
+            }]
+          }
+        "
+else
+    echo "Route53 record for name $ROUTE53_HOSTNAME is up to date. Need not any changes"
+fi
